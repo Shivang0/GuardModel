@@ -396,6 +396,17 @@ class KerasAgent:
                 func_config = config.get('function', '')
                 func_type = config.get('function_type', '')
 
+                # Always flag Lambda layers - they contain arbitrary Python code
+                findings.append(Finding(
+                    rule_id='MG_KERAS_LAMBDA',
+                    category='CODE_EXECUTION',
+                    severity='medium',
+                    title='Lambda layer detected',
+                    description=f'Lambda layer can execute arbitrary Python code',
+                    location=path,
+                    remediation='Replace Lambda with safe Keras layer if possible'
+                ))
+
                 if func_config:
                     # Check for dangerous patterns in lambda function
                     for pattern, severity, desc in self.DANGEROUS_LAMBDA_PATTERNS:

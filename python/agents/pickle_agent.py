@@ -135,6 +135,10 @@ class PickleAgent:
         # High: File system operations (MG040-MG053)
         'os.remove': ('high', 'FILE_SYSTEM', 'File deletion'),
         'os.unlink': ('high', 'FILE_SYSTEM', 'File deletion'),
+        'posix.unlink': ('high', 'FILE_SYSTEM', 'File deletion'),
+        'posix.remove': ('high', 'FILE_SYSTEM', 'File deletion'),
+        'nt.unlink': ('high', 'FILE_SYSTEM', 'File deletion'),
+        'nt.remove': ('high', 'FILE_SYSTEM', 'File deletion'),
         'os.rmdir': ('high', 'FILE_SYSTEM', 'Directory deletion'),
         'shutil.rmtree': ('critical', 'FILE_SYSTEM', 'Recursive directory deletion'),
         'os.rename': ('high', 'FILE_SYSTEM', 'File rename/move'),
