@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+
+# Build outputs (keep dist/ for the action)
+# dist/
+
+# Test outputs
+coverage/
+*.lcov
+.nyc_output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime
+*.pid
+*.seed
+
+# Test artifacts
+test-models/
+guardmodel-results.sarif
+guardmodel-results.json
+
+# Environment
+.env
+.env.local

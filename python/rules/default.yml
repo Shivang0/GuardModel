@@ -1,0 +1,697 @@
+# GuardModel Default Detection Rules
+# Version: 1.0.0
+#
+# This file defines the default detection patterns for ML model security scanning.
+# Rules are organized by category and threat type.
+
+version: 1
+name: GuardModel Default Rules
+description: Default rule set for ML model security scanning
+
+# Global settings
+settings:
+  severity_threshold: medium  # Minimum severity to report
+  max_findings_per_file: 100
+  timeout_seconds: 60
+
+# Rule categories to enable
+categories:
+  code_execution: true
+  network: true
+  file_system: true
+  dangerous_import: true
+  obfuscation: true
+  known_malware: true
+  format_validation: true
+  cve_detection: true
+
+# =============================================================================
+# CODE EXECUTION RULES (MG001-MG019)
+# =============================================================================
+
+rules:
+  # --- Critical: Direct Code Execution ---
+  MG001:
+    enabled: true
+    pattern: "os.system"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "System Command Execution"
+    description: "Executes shell commands with full system access"
+    remediation: "Remove os.system call. Use SafeTensors format."
+    references:
+      - "https://docs.python.org/3/library/os.html#os.system"
+      - "https://cwe.mitre.org/data/definitions/78.html"
+    mitre_attack: "T1059.006"
+
+  MG002:
+    enabled: true
+    pattern: "os.popen"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Piped Command Execution"
+    description: "Opens a pipe to/from a shell command"
+    remediation: "Remove os.popen call. Use SafeTensors format."
+
+  MG003:
+    enabled: true
+    pattern: "subprocess.call"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Subprocess Call"
+    description: "Executes a command in a subprocess"
+    remediation: "Remove subprocess call. Use SafeTensors format."
+
+  MG004:
+    enabled: true
+    pattern: "subprocess.Popen"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Subprocess Popen"
+    description: "Creates subprocess with full I/O control"
+    remediation: "Remove subprocess.Popen. Use SafeTensors format."
+    mitre_attack: "T1059.006"
+
+  MG005:
+    enabled: true
+    pattern: "subprocess.run"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Subprocess Run"
+    description: "Modern subprocess execution"
+    remediation: "Remove subprocess.run. Use SafeTensors format."
+
+  MG006:
+    enabled: true
+    pattern: "subprocess.check_output"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Subprocess Check Output"
+    description: "Subprocess with output capture"
+    remediation: "Remove subprocess.check_output."
+
+  MG007:
+    enabled: true
+    pattern: "builtins.eval"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Eval Execution"
+    description: "Evaluates arbitrary Python expressions"
+    remediation: "Remove eval. Never use eval with untrusted input."
+    references:
+      - "https://nedbatchelder.com/blog/201206/eval_really_is_dangerous.html"
+
+  MG008:
+    enabled: true
+    pattern: "builtins.exec"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Exec Execution"
+    description: "Executes arbitrary Python code"
+    remediation: "Remove exec. Never use exec with untrusted input."
+
+  MG009:
+    enabled: true
+    pattern: "builtins.compile"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Dynamic Compilation"
+    description: "Compiles source into code object"
+    remediation: "Remove compile call."
+
+  MG010:
+    enabled: true
+    pattern: "commands.getoutput"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Legacy Shell Execution"
+    description: "Legacy shell command execution (Python 2)"
+    remediation: "Remove commands module usage."
+
+  MG011:
+    enabled: true
+    pattern: "commands.getstatusoutput"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Legacy Shell Status"
+    description: "Legacy shell command with status (Python 2)"
+    remediation: "Remove commands module usage."
+
+  MG012:
+    enabled: true
+    pattern: "pty.spawn"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "PTY Spawn"
+    description: "Spawns interactive shell with PTY"
+    remediation: "Do not load. PTY spawn is used for interactive shells."
+
+  MG013:
+    enabled: true
+    pattern: "os.execv"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Process Replacement (execv)"
+    description: "Replaces current process with new program"
+    remediation: "Remove os.execv call."
+
+  MG014:
+    enabled: true
+    pattern: "os.execve"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Process Replacement (execve)"
+    description: "Replaces process with environment control"
+    remediation: "Remove os.execve call."
+
+  MG015:
+    enabled: true
+    pattern: "os.spawnl"
+    severity: critical
+    category: CODE_EXECUTION
+    title: "Process Spawning"
+    description: "Spawns new process"
+    remediation: "Remove os.spawn* calls."
+
+# =============================================================================
+# REVERSE SHELL RULES (MG020-MG029)
+# =============================================================================
+
+  MG020:
+    enabled: true
+    pattern: "socket.socket"
+    severity: critical
+    category: REVERSE_SHELL
+    title: "Raw Socket Creation"
+    description: "Creates raw network socket - common in reverse shells"
+    indicators:
+      - "Combined with socket.connect()"
+      - "Followed by os.dup2()"
+      - "subprocess.call(['/bin/sh'])"
+    remediation: "Do not load this file. Investigate source."
+    references:
+      - "https://www.revshells.com/"
+
+  MG021:
+    enabled: true
+    pattern: "socket.create_connection"
+    severity: critical
+    category: REVERSE_SHELL
+    title: "Outbound Connection"
+    description: "Establishes outbound TCP connection"
+    remediation: "Do not load. Verify no unauthorized network access."
+
+# =============================================================================
+# NETWORK RULES (MG022-MG039)
+# =============================================================================
+
+  MG022:
+    enabled: true
+    pattern: "urllib.request.urlopen"
+    severity: high
+    category: NETWORK
+    title: "URL Request"
+    description: "Can download malicious payloads or exfiltrate data"
+    remediation: "Verify any network access is intentional and authorized"
+
+  MG023:
+    enabled: true
+    pattern: "urllib.request.urlretrieve"
+    severity: high
+    category: NETWORK
+    title: "File Download"
+    description: "Downloads file from URL to disk"
+    remediation: "Verify file download is authorized"
+
+  MG024:
+    enabled: true
+    pattern: "requests.get"
+    severity: high
+    category: NETWORK
+    title: "HTTP GET Request"
+    description: "HTTP library can download payloads or exfiltrate data"
+    remediation: "Verify network access is authorized"
+
+  MG025:
+    enabled: true
+    pattern: "requests.post"
+    severity: high
+    category: NETWORK
+    title: "HTTP POST Request"
+    description: "Can send data to external servers"
+    remediation: "Verify no data exfiltration"
+
+  MG026:
+    enabled: true
+    pattern: "http.client.HTTPConnection"
+    severity: high
+    category: NETWORK
+    title: "HTTP Connection"
+    description: "Creates HTTP connection"
+    remediation: "Verify network access is authorized"
+
+  MG027:
+    enabled: true
+    pattern: "ftplib.FTP"
+    severity: high
+    category: NETWORK
+    title: "FTP Connection"
+    description: "Creates FTP connection for file transfer"
+    remediation: "Verify FTP access is authorized"
+
+  MG028:
+    enabled: true
+    pattern: "smtplib.SMTP"
+    severity: high
+    category: NETWORK
+    title: "Email Sending"
+    description: "Can send emails, potentially for exfiltration"
+    remediation: "Verify email sending is authorized"
+
+  MG029:
+    enabled: true
+    pattern: "telnetlib.Telnet"
+    severity: critical
+    category: NETWORK
+    title: "Telnet Connection"
+    description: "Creates unencrypted telnet connection"
+    remediation: "Do not load. Telnet is highly suspicious in ML models."
+
+  MG030:
+    enabled: true
+    pattern: "paramiko.SSHClient"
+    severity: critical
+    category: NETWORK
+    title: "SSH Connection"
+    description: "Creates SSH connection for remote access"
+    remediation: "Do not load. SSH in ML model is highly suspicious."
+
+# =============================================================================
+# FILE SYSTEM RULES (MG040-MG059)
+# =============================================================================
+
+  MG040:
+    enabled: true
+    pattern: "builtins.open"
+    severity: medium
+    category: FILE_SYSTEM
+    title: "File Open Operation"
+    description: "Can read or write arbitrary files"
+    context: "Risk depends on mode: 'r' lower risk, 'w' higher risk"
+    remediation: "Verify file operations are expected and sandboxed"
+
+  MG041:
+    enabled: true
+    pattern: "io.open"
+    severity: medium
+    category: FILE_SYSTEM
+    title: "File Open (io)"
+    description: "Can read or write arbitrary files"
+    remediation: "Verify file operations are expected"
+
+  MG042:
+    enabled: true
+    pattern: "os.remove"
+    severity: high
+    category: FILE_SYSTEM
+    title: "File Deletion"
+    description: "Can delete arbitrary files"
+    remediation: "Do not load without reviewing what files may be deleted"
+
+  MG043:
+    enabled: true
+    pattern: "os.unlink"
+    severity: high
+    category: FILE_SYSTEM
+    title: "File Unlink"
+    description: "Can delete arbitrary files"
+    remediation: "Do not load without reviewing file operations"
+
+  MG044:
+    enabled: true
+    pattern: "os.rmdir"
+    severity: high
+    category: FILE_SYSTEM
+    title: "Directory Deletion"
+    description: "Can delete directories"
+    remediation: "Do not load without reviewing directory operations"
+
+  MG045:
+    enabled: true
+    pattern: "shutil.rmtree"
+    severity: critical
+    category: FILE_SYSTEM
+    title: "Recursive Directory Deletion"
+    description: "Can delete entire directory trees including system files"
+    remediation: "HIGH RISK. Manual review required."
+    example_payload: "shutil.rmtree('/') # Deletes everything"
+
+  MG046:
+    enabled: true
+    pattern: "os.rename"
+    severity: high
+    category: FILE_SYSTEM
+    title: "File Rename"
+    description: "Can rename/move files"
+    remediation: "Review for privilege escalation attempts"
+
+  MG047:
+    enabled: true
+    pattern: "shutil.move"
+    severity: high
+    category: FILE_SYSTEM
+    title: "File Move"
+    description: "Can move files between locations"
+    remediation: "Review file operations"
+
+  MG048:
+    enabled: true
+    pattern: "os.chmod"
+    severity: high
+    category: FILE_SYSTEM
+    title: "Permission Modification"
+    description: "Can change file permissions, potentially making files executable"
+    remediation: "Review for privilege escalation attempts"
+
+  MG049:
+    enabled: true
+    pattern: "os.chown"
+    severity: high
+    category: FILE_SYSTEM
+    title: "Ownership Modification"
+    description: "Can change file ownership"
+    remediation: "Review for privilege escalation"
+
+  MG050:
+    enabled: true
+    pattern: "os.makedirs"
+    severity: medium
+    category: FILE_SYSTEM
+    title: "Directory Creation"
+    description: "Can create directories"
+    remediation: "Verify directory creation is expected"
+
+# =============================================================================
+# DANGEROUS IMPORT RULES (MG060-MG079)
+# =============================================================================
+
+  MG060:
+    enabled: true
+    pattern: "importlib.import_module"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Dynamic Module Import"
+    description: "Can import arbitrary modules at runtime"
+    attack_scenario: "Attacker imports os module to gain system access"
+    remediation: "Verify imported modules are safe"
+
+  MG061:
+    enabled: true
+    pattern: "__import__"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Built-in Import"
+    description: "Direct use of import machinery"
+    remediation: "Review what modules are being imported"
+
+  MG062:
+    enabled: true
+    pattern: "imp.load_module"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Legacy Module Loading"
+    description: "Loads arbitrary Python modules"
+    remediation: "Review module loading"
+
+  MG063:
+    enabled: true
+    pattern: "runpy.run_module"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Module Execution"
+    description: "Executes a module as a script"
+    remediation: "Do not load. Module execution is dangerous."
+
+  MG064:
+    enabled: true
+    pattern: "runpy.run_path"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Path Execution"
+    description: "Executes a file path as Python"
+    remediation: "Do not load. Path execution is dangerous."
+
+  MG065:
+    enabled: true
+    pattern: "ctypes.CDLL"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "C Library Loading"
+    description: "Can load and execute arbitrary C code"
+    attack_scenario: "Load malicious .so/.dll for native code execution"
+    remediation: "Do not load. Native code execution risk."
+
+  MG066:
+    enabled: true
+    pattern: "ctypes.cdll"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "C Library Access"
+    description: "Access to C library loader"
+    remediation: "Do not load. Native code risk."
+
+  MG067:
+    enabled: true
+    pattern: "ctypes.windll"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Windows DLL Loading"
+    description: "Can load Windows DLLs for native code execution"
+    platform: windows
+    remediation: "Do not load on Windows systems"
+
+  MG068:
+    enabled: true
+    pattern: "cffi.FFI"
+    severity: high
+    category: DANGEROUS_IMPORT
+    title: "Foreign Function Interface"
+    description: "CFFI allows calling C code"
+    remediation: "Do not load. FFI enables native code execution."
+
+# =============================================================================
+# OBFUSCATION RULES (MG080-MG099)
+# =============================================================================
+
+  MG080:
+    enabled: true
+    pattern: "base64.b64decode"
+    severity: medium
+    category: OBFUSCATION
+    title: "Base64 Decoding"
+    description: "Can decode hidden payloads"
+    heuristic: "Higher risk if combined with exec/eval"
+    remediation: "Decode and inspect the payload manually"
+
+  MG081:
+    enabled: true
+    pattern: "codecs.decode"
+    severity: medium
+    category: OBFUSCATION
+    title: "Codec Decoding"
+    description: "Can decode obfuscated content"
+    remediation: "Inspect decoded content"
+
+  MG082:
+    enabled: true
+    pattern: "zlib.decompress"
+    severity: medium
+    category: OBFUSCATION
+    title: "Zlib Decompression"
+    description: "Can decompress hidden payloads"
+    remediation: "Decompress and inspect content"
+
+  MG083:
+    enabled: true
+    pattern: "gzip.decompress"
+    severity: medium
+    category: OBFUSCATION
+    title: "Gzip Decompression"
+    description: "Can decompress hidden payloads"
+    remediation: "Decompress and inspect content"
+
+  MG084:
+    enabled: true
+    pattern: "bz2.decompress"
+    severity: medium
+    category: OBFUSCATION
+    title: "Bzip2 Decompression"
+    description: "Can decompress hidden payloads"
+    remediation: "Decompress and inspect content"
+
+  MG085:
+    enabled: true
+    pattern: "lzma.decompress"
+    severity: medium
+    category: OBFUSCATION
+    title: "LZMA Decompression"
+    description: "Can decompress hidden payloads"
+    remediation: "Decompress and inspect content"
+
+  MG086:
+    enabled: true
+    pattern: "marshal.loads"
+    severity: high
+    category: OBFUSCATION
+    title: "Marshal Deserialization"
+    description: "Deserializes Python bytecode - can execute arbitrary code"
+    attack_scenario: "Attacker hides malicious bytecode in marshal format"
+    remediation: "HIGH RISK. Do not load without expert review."
+
+  MG087:
+    enabled: true
+    pattern: "pickle.loads"
+    severity: high
+    category: OBFUSCATION
+    title: "Nested Pickle"
+    description: "Pickle within pickle - may bypass scanners"
+    attack_scenario: "Outer pickle unpacks and loads inner malicious pickle"
+    remediation: "Recursive analysis required"
+
+  MG088:
+    enabled: true
+    pattern: "binascii.unhexlify"
+    severity: medium
+    category: OBFUSCATION
+    title: "Hex Decoding"
+    description: "Can decode hex-encoded payloads"
+    remediation: "Inspect decoded content"
+
+  MG089:
+    enabled: true
+    pattern: "ast.literal_eval"
+    severity: medium
+    category: OBFUSCATION
+    title: "Literal Evaluation"
+    description: "Evaluates Python literal expressions"
+    remediation: "Review evaluated content"
+
+# =============================================================================
+# FORMAT VALIDATION RULES (MG100-MG109)
+# =============================================================================
+
+  MG100:
+    enabled: true
+    pattern: "__magic_bytes__"
+    severity: medium
+    category: SUSPICIOUS_STRUCTURE
+    title: "Invalid Magic Bytes"
+    description: "File does not match expected format signature"
+    remediation: "File may be corrupt or misnamed"
+
+  MG101:
+    enabled: true
+    pattern: "__corrupt_structure__"
+    severity: medium
+    category: SUSPICIOUS_STRUCTURE
+    title: "Corrupt Structure"
+    description: "File structure is invalid"
+    remediation: "Re-download from source"
+
+  MG102:
+    enabled: true
+    pattern: "__oversized__"
+    severity: low
+    category: SUSPICIOUS_STRUCTURE
+    title: "Oversized Element"
+    description: "File contains unusually large elements"
+    remediation: "Verify file integrity"
+
+  MG103:
+    enabled: true
+    pattern: "__nested_archive__"
+    severity: medium
+    category: SUSPICIOUS_STRUCTURE
+    title: "Nested Archive"
+    description: "Archive contains nested archives"
+    remediation: "Extract and scan nested content"
+
+# =============================================================================
+# CVE RULES (MG110+)
+# =============================================================================
+
+  MG110:
+    enabled: true
+    pattern: "CVE-2024-5480"
+    severity: critical
+    category: CVE_VULNERABLE
+    title: "CVE-2024-5480: PyTorch Distributed RPC RCE"
+    description: "Remote code execution via PyTorch Distributed RPC"
+    affected_versions: "PyTorch < 2.3.0"
+    affected_patterns:
+      - "torch.distributed.rpc"
+    references:
+      - "https://nvd.nist.gov/vuln/detail/CVE-2024-5480"
+
+  MG111:
+    enabled: true
+    pattern: "CVE-2024-3660"
+    severity: high
+    category: CVE_VULNERABLE
+    title: "CVE-2024-3660: Keras safe_mode Bypass"
+    description: "Bypass of Keras safe_mode allows arbitrary code execution"
+    affected_versions: "Keras < 3.0.0"
+    affected_patterns:
+      - "keras.models.load_model"
+    references:
+      - "https://nvd.nist.gov/vuln/detail/CVE-2024-3660"
+
+  MG112:
+    enabled: true
+    pattern: "CVE-2025-1716"
+    severity: high
+    category: CVE_VULNERABLE
+    title: "CVE-2025-1716: picklescan Bypass"
+    description: "Multiple bypasses in picklescan security scanner"
+    affected_patterns:
+      - "__reduce_ex__"
+      - "persistent_id"
+    references:
+      - "https://blog.sonatype.com/picklescan-bypass"
+
+# =============================================================================
+# ALLOWLIST PATTERNS
+# =============================================================================
+
+# Common safe patterns that should not trigger alerts
+allowlist_patterns:
+  - "torch\\.nn\\..*"           # PyTorch neural network modules
+  - "torch\\.optim\\..*"        # PyTorch optimizers
+  - "torch\\.utils\\..*"        # PyTorch utilities
+  - "tensorflow\\..*"           # TensorFlow modules
+  - "keras\\.layers\\..*"       # Keras layers
+  - "keras\\.models\\..*"       # Keras models
+  - "transformers\\..*"         # Hugging Face transformers
+  - "numpy\\..*"                # NumPy
+  - "collections\\..*"          # Python collections
+  - "functools\\..*"            # Python functools
+  - "itertools\\..*"            # Python itertools
+  - "operator\\..*"             # Python operator module
+
+# =============================================================================
+# SENSITIVE FILE PATHS
+# =============================================================================
+
+sensitive_paths:
+  - "/etc/passwd"
+  - "/etc/shadow"
+  - "/etc/sudoers"
+  - "~/.ssh/"
+  - "~/.aws/"
+  - "~/.config/"
+  - "/root/"
+  - "C:\\Windows\\System32"
+  - "C:\\Users\\"
+  - ".env"
+  - "credentials"
+  - "secrets"

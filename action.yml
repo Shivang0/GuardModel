@@ -1,0 +1,97 @@
+name: 'GuardModel Security Scan'
+description: 'Scan ML model files for malicious code, vulnerabilities, and security risks'
+author: 'GuardModel'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Directory to scan (default: repository root)'
+    required: false
+    default: '.'
+  config:
+    description: 'Path to config file'
+    required: false
+    default: '.guardmodel.yml'
+  fail-on:
+    description: 'Minimum severity to fail (critical, high, medium, low, none)'
+    required: false
+    default: 'high'
+  output-sarif:
+    description: 'Generate SARIF output'
+    required: false
+    default: 'true'
+  output-json:
+    description: 'Generate JSON output'
+    required: false
+    default: 'true'
+  comment-on-pr:
+    description: 'Post comment on PR with results'
+    required: false
+    default: 'true'
+  max-file-size:
+    description: 'Maximum file size to scan (e.g., 5GB)'
+    required: false
+    default: '5GB'
+
+outputs:
+  status:
+    description: 'Scan status (passed, failed, error)'
+  findings-count:
+    description: 'Total number of findings'
+  critical-count:
+    description: 'Number of critical findings'
+  high-count:
+    description: 'Number of high findings'
+  medium-count:
+    description: 'Number of medium findings'
+  low-count:
+    description: 'Number of low findings'
+  sarif-file:
+    description: 'Path to SARIF output file'
+  json-file:
+    description: 'Path to JSON output file'
+  scan-duration:
+    description: 'Scan duration in milliseconds'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        pip install --quiet fickling h5py onnx safetensors
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run ModelGuard scan
+      id: scan
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_OUTPUT_SARIF: ${{ inputs.output-sarif }}
+        INPUT_OUTPUT_JSON: ${{ inputs.output-json }}
+        INPUT_COMMENT_ON_PR: ${{ inputs.comment-on-pr }}
+        INPUT_MAX_FILE_SIZE: ${{ inputs.max-file-size }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        node ${{ github.action_path }}/dist/index.js
+
+    - name: Upload SARIF
+      if: inputs.output-sarif == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: modelguard-results.sarif
+      continue-on-error: true
