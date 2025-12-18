@@ -15,6 +15,7 @@ import hashlib
 import tempfile
 import zipfile
 import pickletools
+import math
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict, field
@@ -67,11 +68,68 @@ class PickleAgent:
     """
 
     NAME = "pickle_agent"
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
     SUPPORTED_EXTENSIONS = ['.pkl', '.pickle', '.pt', '.pth', '.bin', '.joblib']
 
+    # Safe patterns - common ML libraries that should not trigger false positives
+    # Inspired by SaferPickle whitelist
+    SAFE_PATTERNS = frozenset([
+        # NumPy
+        'numpy', 'numpy.core', 'numpy.core.multiarray', 'numpy.ndarray',
+        'numpy.dtype', 'numpy.core._multiarray_umath', 'numpy.random',
+        # PyTorch
+        'torch', 'torch.nn', 'torch.Tensor', 'torch.nn.modules',
+        'torch.nn.parameter', 'torch._utils', 'torch.storage',
+        # TensorFlow/Keras
+        'tensorflow', 'tensorflow.python', 'keras', 'keras.layers',
+        # Scikit-learn
+        'sklearn', 'sklearn.ensemble', 'sklearn.linear_model',
+        'sklearn.tree', 'sklearn.preprocessing', 'sklearn.pipeline',
+        # Pandas
+        'pandas', 'pandas.core', 'pandas.core.frame', 'pandas.core.series',
+        # SciPy
+        'scipy', 'scipy.sparse', 'scipy.stats',
+        # Other ML libraries
+        'transformers', 'jax', 'flax',
+        # Python builtins (safe)
+        'collections', 'collections.OrderedDict', 'functools', 'functools.partial',
+        'datetime', 'datetime.datetime', 'datetime.date', 'datetime.time',
+        'decimal', 'decimal.Decimal', 'fractions', 'fractions.Fraction',
+        # Copy/reconstruction (normal pickle)
+        'copy_reg', 'copyreg', '_codecs', 'codecs',
+    ])
+
+    # Non-pickle magic bytes - detect disguised files
+    # Based on SaferPickle magic byte detection
+    NON_PICKLE_MAGIC_BYTES = {
+        b'\x7fELF': ('ELF executable', 'critical', 'Executable disguised as model file'),
+        b'MZ': ('Windows PE executable', 'critical', 'Executable disguised as model file'),
+        b'\x89PNG': ('PNG image', 'medium', 'Image file disguised as model'),
+        b'\xff\xd8\xff': ('JPEG image', 'medium', 'Image file disguised as model'),
+        b'%PDF': ('PDF document', 'medium', 'PDF file disguised as model'),
+        b'Rar!': ('RAR archive', 'medium', 'Archive file disguised as model'),
+        b'\x1f\x8b': ('Gzip compressed', 'low', 'Compressed file - may contain pickle'),
+        b'BZh': ('Bzip2 compressed', 'low', 'Compressed file - may contain pickle'),
+        # Note: PK (ZIP) is handled specially for PyTorch
+    }
+
+    # Suspicious patterns - warrant investigation but not immediately dangerous
+    # Based on SaferPickle suspicious patterns
+    SUSPICIOUS_PATTERNS: Dict[str, Tuple[str, str, str]] = {
+        '__getattribute__': ('low', 'SUSPICIOUS', 'Dynamic attribute access'),
+        '__subclasses__': ('medium', 'SUSPICIOUS', 'Class hierarchy traversal - sandbox escape technique'),
+        '__mro__': ('medium', 'SUSPICIOUS', 'Method resolution order access'),
+        '__bases__': ('medium', 'SUSPICIOUS', 'Base class access'),
+        '__class__': ('low', 'SUSPICIOUS', 'Class access'),
+        '__reduce_ex__': ('low', 'SUSPICIOUS', 'Custom pickle reduction'),
+        '__getstate__': ('low', 'SUSPICIOUS', 'Custom pickle state'),
+        '__setstate__': ('low', 'SUSPICIOUS', 'Custom pickle state restoration'),
+        'object.__subclasses__': ('medium', 'SUSPICIOUS', 'Class hierarchy traversal'),
+        'type.__subclasses__': ('medium', 'SUSPICIOUS', 'Type hierarchy traversal'),
+    }
+
     # Comprehensive dangerous patterns with severity and context
-    # Based on skills.md detection rules
+    # Based on skills.md detection rules + SaferPickle patterns
     DANGEROUS_PATTERNS: Dict[str, Tuple[str, str, str]] = {
         # Critical: Direct code execution (MG001-MG015)
         'os.system': ('critical', 'CODE_EXECUTION', 'System shell command execution'),
@@ -216,6 +274,36 @@ class PickleAgent:
         # Info: __reduce__ related (often legitimate but worth noting)
         'copy_reg._reconstructor': ('info', 'SUSPICIOUS_STRUCTURE', 'Object reconstruction'),
         'copyreg._reconstructor': ('info', 'SUSPICIOUS_STRUCTURE', 'Object reconstruction'),
+
+        # Additional patterns from SaferPickle
+        # Critical: Direct code/function object creation
+        'types.CodeType': ('critical', 'CODE_EXECUTION', 'Direct code object creation'),
+        'types.FunctionType': ('critical', 'CODE_EXECUTION', 'Direct function object creation'),
+
+        # High: Unsafe deserialization in other libraries
+        'torch.load': ('high', 'CODE_EXECUTION', 'PyTorch load can execute arbitrary code'),
+        'pandas.read_pickle': ('high', 'CODE_EXECUTION', 'Pandas pickle can execute arbitrary code'),
+        'joblib.load': ('high', 'CODE_EXECUTION', 'Joblib load can execute arbitrary code'),
+        'dill.load': ('high', 'CODE_EXECUTION', 'Dill load can execute arbitrary code'),
+        'dill.loads': ('high', 'CODE_EXECUTION', 'Dill loads can execute arbitrary code'),
+        'cloudpickle.load': ('high', 'CODE_EXECUTION', 'Cloudpickle can execute arbitrary code'),
+        'cloudpickle.loads': ('high', 'CODE_EXECUTION', 'Cloudpickle loads can execute arbitrary code'),
+        'shelve.open': ('high', 'FILE_SYSTEM', 'Shelve uses pickle internally'),
+        'xmlrpc.server.resolve_dotted_attribute': ('high', 'CODE_EXECUTION', 'XML-RPC attribute resolution'),
+
+        # Medium: SymPy and other code generation
+        'sympy.utilities.lambdify.lambdify': ('medium', 'CODE_EXECUTION', 'SymPy lambdify creates callable'),
+        'sympy.lambdify': ('medium', 'CODE_EXECUTION', 'SymPy lambdify creates callable'),
+
+        # High: Webbrowser module (can open arbitrary URLs)
+        'webbrowser.open': ('high', 'NETWORK', 'Opens URLs in browser'),
+        'webbrowser.open_new': ('high', 'NETWORK', 'Opens URLs in browser'),
+        'webbrowser.open_new_tab': ('high', 'NETWORK', 'Opens URLs in browser'),
+
+        # Medium: Tempfile (can be used to create files)
+        'tempfile.NamedTemporaryFile': ('medium', 'FILE_SYSTEM', 'Creates temporary files'),
+        'tempfile.mktemp': ('medium', 'FILE_SYSTEM', 'Creates temporary path'),
+        'tempfile.mkdtemp': ('medium', 'FILE_SYSTEM', 'Creates temporary directory'),
     }
 
     def __init__(self, rules: Optional[List[Dict]] = None):
@@ -234,6 +322,88 @@ class PickleAgent:
                     rule.get('message', 'Custom rule match')
                 )
         return patterns
+
+    def _check_magic_bytes(self, file_path: str) -> Optional[Tuple[str, str, str]]:
+        """
+        Check file magic bytes to detect disguised files.
+        Returns (file_type, severity, description) if non-pickle detected, None otherwise.
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                header = f.read(8)  # Read enough for all magic checks
+
+            for magic, (file_type, severity, description) in self.NON_PICKLE_MAGIC_BYTES.items():
+                if header.startswith(magic):
+                    return (file_type, severity, description)
+
+            return None
+        except (IOError, OSError):
+            return None
+
+    def _classify_pattern(self, module_func: str) -> Tuple[str, str, str, str]:
+        """
+        Classify a pattern into safe/unsafe/suspicious/unknown.
+        Returns (classification, severity, category, description).
+        """
+        # Check exact match for dangerous patterns
+        if module_func in self.DANGEROUS_PATTERNS:
+            severity, category, desc = self.DANGEROUS_PATTERNS[module_func]
+            return ('unsafe', severity, category, desc)
+
+        # Check custom patterns
+        if module_func in self.custom_patterns:
+            severity, category, desc = self.custom_patterns[module_func]
+            return ('unsafe', severity, category, desc)
+
+        # Check suspicious patterns
+        if module_func in self.SUSPICIOUS_PATTERNS:
+            severity, category, desc = self.SUSPICIOUS_PATTERNS[module_func]
+            return ('suspicious', severity, category, desc)
+
+        # Check for suspicious pattern suffixes (e.g., __subclasses__)
+        for pattern, (severity, category, desc) in self.SUSPICIOUS_PATTERNS.items():
+            if module_func.endswith('.' + pattern) or module_func == pattern:
+                return ('suspicious', severity, category, desc)
+
+        # Check safe patterns (exact match or prefix)
+        if module_func in self.SAFE_PATTERNS:
+            return ('safe', 'info', 'SAFE', 'Known safe ML library')
+
+        # Check if module prefix is safe
+        for safe_prefix in self.SAFE_PATTERNS:
+            if module_func.startswith(safe_prefix + '.'):
+                return ('safe', 'info', 'SAFE', f'Part of safe module: {safe_prefix}')
+
+        # Unknown pattern
+        return ('unknown', 'low', 'UNKNOWN', f'Unknown pattern: {module_func}')
+
+    def _calculate_risk_score(self, safe_count: int, unsafe_count: int,
+                              suspicious_count: int, unknown_count: int) -> Tuple[str, float]:
+        """
+        Calculate risk score using SaferPickle's logarithmic algorithm.
+        Returns (risk_level, numeric_score).
+        """
+        # Calculate weighted scores (logarithmic to handle large counts)
+        safe_score = math.log(safe_count + 1) * 2
+        unsafe_score = math.log(unsafe_count + 1) * 4
+        suspicious_score = math.log(suspicious_count + 1) * 3
+        unknown_score = math.log(unknown_count + 1) * 1
+
+        # Calculate numeric risk score (0-10 scale)
+        total_score = unsafe_score + suspicious_score * 0.5 + unknown_score * 0.25
+        risk_score = min(10.0, total_score)
+
+        # Determine risk level based on pattern counts
+        if unsafe_count > 0 and (unsafe_count + 0.5 * suspicious_count) > safe_count:
+            return ('malicious', risk_score)
+        elif safe_count == 0 and unsafe_count >= 1:
+            return ('malicious', risk_score)
+        elif unsafe_count > 0:
+            return ('suspicious', risk_score)
+        elif suspicious_count > 0 or unknown_count > safe_count:
+            return ('suspicious', max(risk_score, 3.0))
+        else:
+            return ('clean', risk_score)
 
     def can_scan(self, file_path: str) -> bool:
         """Check if this agent can handle the file."""
@@ -263,21 +433,57 @@ class PickleAgent:
         """
         Perform comprehensive pickle security scan.
 
-        1. Calculate file hash
-        2. Detect format (raw pickle or PyTorch ZIP)
-        3. Extract and analyze pickle content
-        4. Run fickling analysis if available
-        5. Pattern match against dangerous functions
-        6. Return consolidated findings
+        1. Check for disguised files (magic bytes)
+        2. Calculate file hash
+        3. Detect format (raw pickle or PyTorch ZIP)
+        4. Extract and analyze pickle content
+        5. Run fickling analysis if available
+        6. Pattern match against dangerous functions
+        7. Calculate risk score
+        8. Return consolidated findings
         """
         start_time = time.time()
         options = options or {}
         findings: List[Finding] = []
-        metadata: Dict[str, Any] = {}
+        metadata: Dict[str, Any] = {
+            'safe_count': 0,
+            'unsafe_count': 0,
+            'suspicious_count': 0,
+            'unknown_count': 0,
+            'risk_score': 0.0,
+            'disguised_file_type': None,
+        }
 
         # Calculate SHA256
         sha256 = self._calculate_hash(file_path)
         file_size = os.path.getsize(file_path)
+
+        # Check for disguised files (non-pickle magic bytes)
+        disguised = self._check_magic_bytes(file_path)
+        if disguised:
+            file_type, severity, description = disguised
+            metadata['disguised_file_type'] = file_type
+            findings.append(Finding(
+                rule_id='MG_DISGUISED_FILE',
+                category='SUSPICIOUS_STRUCTURE',
+                severity=severity,
+                title=f'Disguised File: {file_type}',
+                description=description,
+                remediation=f'File appears to be {file_type}, not a pickle. Verify file source.',
+                references=['https://github.com/google/saferpickle']
+            ))
+            # For executables, return immediately with critical finding
+            if severity == 'critical':
+                return ScanResult(
+                    file=file_path,
+                    format=file_type,
+                    size=file_size,
+                    sha256=sha256,
+                    scan_duration=time.time() - start_time,
+                    status='malicious',
+                    findings=[asdict(f) for f in findings],
+                    metadata=metadata
+                )
 
         # Detect format
         detected_format = self._detect_format(file_path)
@@ -287,9 +493,18 @@ class PickleAgent:
         try:
             # Handle PyTorch ZIP format
             if detected_format == 'pytorch_zip':
-                findings.extend(self._scan_pytorch_zip(file_path))
+                scan_findings, counts = self._scan_pytorch_zip(file_path)
+                findings.extend(scan_findings)
+                # Aggregate counts from nested scans
+                for key in ['safe_count', 'unsafe_count', 'suspicious_count', 'unknown_count']:
+                    metadata[key] += counts.get(key, 0)
             else:
-                findings.extend(self._scan_raw_pickle(file_path))
+                scan_findings, counts = self._scan_raw_pickle(file_path)
+                findings.extend(scan_findings)
+                metadata['safe_count'] = counts.get('safe_count', 0)
+                metadata['unsafe_count'] = counts.get('unsafe_count', 0)
+                metadata['suspicious_count'] = counts.get('suspicious_count', 0)
+                metadata['unknown_count'] = counts.get('unknown_count', 0)
 
             # Run fickling analysis if available
             if FICKLING_AVAILABLE:
@@ -309,8 +524,17 @@ class PickleAgent:
         # Deduplicate findings
         findings = self._deduplicate_findings(findings)
 
-        # Determine overall status
-        status = self._determine_status(findings)
+        # Calculate risk score and determine status
+        risk_level, risk_score = self._calculate_risk_score(
+            metadata['safe_count'],
+            metadata['unsafe_count'],
+            metadata['suspicious_count'],
+            metadata['unknown_count']
+        )
+        metadata['risk_score'] = round(risk_score, 2)
+
+        # Determine overall status (use traditional method if risk scoring doesn't flag)
+        status = self._determine_status(findings, risk_level)
 
         scan_duration = time.time() - start_time
 
@@ -351,9 +575,15 @@ class PickleAgent:
             else:
                 return 'pickle_legacy'
 
-    def _scan_pytorch_zip(self, file_path: str) -> List[Finding]:
+    def _scan_pytorch_zip(self, file_path: str) -> Tuple[List[Finding], Dict[str, int]]:
         """Scan PyTorch ZIP format (contains pickled data)."""
         findings: List[Finding] = []
+        total_counts = {
+            'safe_count': 0,
+            'unsafe_count': 0,
+            'suspicious_count': 0,
+            'unknown_count': 0,
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -384,11 +614,14 @@ class PickleAgent:
                                 header = f.read(2)
                                 if header in (b'\x80\x02', b'\x80\x03', b'\x80\x04', b'\x80\x05') or \
                                    header[0:1] in (b'(', b']', b'}', b'c'):
-                                    member_findings = self._scan_raw_pickle(extracted_path)
+                                    member_findings, member_counts = self._scan_raw_pickle(extracted_path)
                                     # Update location to show nested path
                                     for f in member_findings:
                                         f.location = f'{file_path}!{member}' + (f' ({f.location})' if f.location else '')
                                     findings.extend(member_findings)
+                                    # Aggregate counts
+                                    for key in total_counts:
+                                        total_counts[key] += member_counts.get(key, 0)
                         except Exception as e:
                             # Skip files that can't be extracted
                             continue
@@ -403,11 +636,19 @@ class PickleAgent:
                     remediation='Verify file integrity, re-download from source'
                 ))
 
-        return findings
+        return findings, total_counts
 
-    def _scan_raw_pickle(self, file_path: str) -> List[Finding]:
+    def _scan_raw_pickle(self, file_path: str) -> Tuple[List[Finding], Dict[str, int]]:
         """Scan raw pickle file for dangerous patterns."""
         findings: List[Finding] = []
+        counts = {
+            'safe_count': 0,
+            'unsafe_count': 0,
+            'suspicious_count': 0,
+            'unknown_count': 0,
+        }
+        # Track patterns we've already classified to avoid double-counting
+        seen_patterns: set = set()
 
         try:
             with open(file_path, 'rb') as f:
@@ -425,7 +666,7 @@ class PickleAgent:
                     description=f'Could not parse pickle structure: {str(e)}',
                     remediation='File may be corrupt or obfuscated'
                 ))
-                return findings
+                return findings, counts
 
             # Track stack for STACK_GLOBAL analysis (Python 3.4+)
             # STACK_GLOBAL pops module and name from stack (pushed by SHORT_BINUNICODE, BINUNICODE, etc.)
@@ -433,6 +674,60 @@ class PickleAgent:
             # Track memo for BINGET/MEMOIZE operations
             memo: Dict[int, str] = {}
             memo_counter = 0
+
+            def process_pattern(module_func: str, pos: int):
+                """Process a pattern and update counts/findings."""
+                # Track for counting (once per unique pattern)
+                if module_func not in seen_patterns:
+                    seen_patterns.add(module_func)
+                    classification, _, _, _ = self._classify_pattern(module_func)
+                    counts[f'{classification}_count'] += 1
+
+                # Check against dangerous patterns (always report)
+                if module_func in self.DANGEROUS_PATTERNS:
+                    severity, category, desc = self.DANGEROUS_PATTERNS[module_func]
+                    findings.append(Finding(
+                        rule_id=f'MG_{category}',
+                        category=category,
+                        severity=severity,
+                        title=f'Dangerous Import: {module_func}',
+                        description=desc,
+                        pattern=module_func,
+                        location=f'Byte offset: {pos}',
+                        remediation=f'Remove {module_func} call. Use SafeTensors format.',
+                        references=['https://blog.trailofbits.com/2021/03/15/never-a-dill-moment-exploiting-machine-learning-pickle-files/']
+                    ))
+
+                # Check custom patterns
+                if module_func in self.custom_patterns:
+                    severity, category, desc = self.custom_patterns[module_func]
+                    findings.append(Finding(
+                        rule_id=f'MG_CUSTOM_{category}',
+                        category=category,
+                        severity=severity,
+                        title=f'Custom Rule Match: {module_func}',
+                        description=desc,
+                        pattern=module_func,
+                        location=f'Byte offset: {pos}',
+                        remediation='Review this pattern per custom rule definition'
+                    ))
+
+                # Check suspicious patterns
+                if module_func in self.SUSPICIOUS_PATTERNS:
+                    severity, category, desc = self.SUSPICIOUS_PATTERNS[module_func]
+                    findings.append(Finding(
+                        rule_id=f'MG_{category}',
+                        category=category,
+                        severity=severity,
+                        title=f'Suspicious Pattern: {module_func}',
+                        description=desc,
+                        pattern=module_func,
+                        location=f'Byte offset: {pos}',
+                        remediation='Review this pattern manually'
+                    ))
+
+                # Check for partial matches (module-level)
+                findings.extend(self._check_partial_matches(module_func, pos))
 
             for opcode, arg, pos in opcodes:
                 # Track string values pushed onto the stack
@@ -461,82 +756,20 @@ class PickleAgent:
                 # Check GLOBAL opcode (imports) - older pickle protocols
                 elif opcode.name == 'GLOBAL':
                     module_func = self._normalize_global(arg)
-
-                    # Check against dangerous patterns
-                    if module_func in self.DANGEROUS_PATTERNS:
-                        severity, category, desc = self.DANGEROUS_PATTERNS[module_func]
-                        findings.append(Finding(
-                            rule_id=f'MG_{category}',
-                            category=category,
-                            severity=severity,
-                            title=f'Dangerous Import: {module_func}',
-                            description=desc,
-                            pattern=module_func,
-                            location=f'Byte offset: {pos}',
-                            remediation=f'Remove {module_func} call. Use SafeTensors format.',
-                            references=['https://blog.trailofbits.com/2021/03/15/never-a-dill-moment-exploiting-machine-learning-pickle-files/']
-                        ))
-
-                    # Check custom patterns
-                    if module_func in self.custom_patterns:
-                        severity, category, desc = self.custom_patterns[module_func]
-                        findings.append(Finding(
-                            rule_id=f'MG_CUSTOM_{category}',
-                            category=category,
-                            severity=severity,
-                            title=f'Custom Rule Match: {module_func}',
-                            description=desc,
-                            pattern=module_func,
-                            location=f'Byte offset: {pos}',
-                            remediation='Review this pattern per custom rule definition'
-                        ))
-
-                    # Check for partial matches (module-level)
-                    findings.extend(self._check_partial_matches(module_func, pos))
+                    process_pattern(module_func, pos)
 
                 # Check STACK_GLOBAL opcode (Python 3.4+)
                 # STACK_GLOBAL pops the top two stack items: module_name, func_name
                 elif opcode.name == 'STACK_GLOBAL':
-                    module_func = None
                     if len(string_stack) >= 2:
                         # Pop module and function from stack (in order: module, then function)
                         func_name = string_stack.pop()
                         module_name = string_stack.pop()
                         module_func = f'{module_name}.{func_name}'
-
-                        # Check against dangerous patterns
-                        if module_func in self.DANGEROUS_PATTERNS:
-                            severity, category, desc = self.DANGEROUS_PATTERNS[module_func]
-                            findings.append(Finding(
-                                rule_id=f'MG_{category}',
-                                category=category,
-                                severity=severity,
-                                title=f'Dangerous Import: {module_func}',
-                                description=desc,
-                                pattern=module_func,
-                                location=f'Byte offset: {pos}',
-                                remediation=f'Remove {module_func} call. Use SafeTensors format.',
-                                references=['https://blog.trailofbits.com/2021/03/15/never-a-dill-moment-exploiting-machine-learning-pickle-files/']
-                            ))
-
-                        # Check custom patterns
-                        if module_func in self.custom_patterns:
-                            severity, category, desc = self.custom_patterns[module_func]
-                            findings.append(Finding(
-                                rule_id=f'MG_CUSTOM_{category}',
-                                category=category,
-                                severity=severity,
-                                title=f'Custom Rule Match: {module_func}',
-                                description=desc,
-                                pattern=module_func,
-                                location=f'Byte offset: {pos}',
-                                remediation='Review this pattern per custom rule definition'
-                            ))
-
-                        # Check for partial matches (module-level)
-                        findings.extend(self._check_partial_matches(module_func, pos))
+                        process_pattern(module_func, pos)
                     else:
                         # Could not reconstruct the callable - flag for review
+                        counts['unknown_count'] += 1
                         findings.append(Finding(
                             rule_id='MG_STACK_GLOBAL',
                             category='SUSPICIOUS_STRUCTURE',
@@ -553,17 +786,6 @@ class PickleAgent:
                     # For more precise tracking, would need full pickle VM simulation
                     pass
 
-                # Check for REDUCE with suspicious patterns
-                elif opcode.name == 'REDUCE':
-                    # REDUCE executes a callable - this is where code runs
-                    # The callable should have been loaded via GLOBAL
-                    pass
-
-                # Check for BUILD opcode with __setstate__
-                elif opcode.name == 'BUILD':
-                    # BUILD can trigger __setstate__ which may execute code
-                    pass
-
         except Exception as e:
             findings.append(Finding(
                 rule_id='MG_SCAN_ERROR',
@@ -574,7 +796,7 @@ class PickleAgent:
                 remediation='File may be corrupt'
             ))
 
-        return findings
+        return findings, counts
 
     def _normalize_global(self, arg: Any) -> str:
         """Normalize GLOBAL opcode argument to module.function format."""
@@ -680,21 +902,27 @@ class PickleAgent:
 
         return unique
 
-    def _determine_status(self, findings: List[Finding]) -> str:
-        """Determine overall scan status from findings."""
-        if not findings:
-            return 'clean'
+    def _determine_status(self, findings: List[Finding], risk_level: str = 'clean') -> str:
+        """
+        Determine overall scan status from findings and risk scoring.
+        Uses both traditional severity-based detection and SaferPickle risk scoring.
+        """
+        # Traditional severity-based status
+        severity_status = 'clean'
+        if findings:
+            severities = [f.severity for f in findings]
+            if 'critical' in severities:
+                severity_status = 'malicious'
+            elif 'high' in severities:
+                severity_status = 'suspicious'
+            elif 'medium' in severities:
+                severity_status = 'suspicious'
 
-        severities = [f.severity for f in findings]
-
-        if 'critical' in severities:
-            return 'malicious'
-        elif 'high' in severities:
-            return 'suspicious'
-        elif 'medium' in severities:
-            return 'suspicious'
-        else:
-            return 'clean'
+        # Use the more severe of the two methods
+        status_priority = {'clean': 0, 'suspicious': 1, 'malicious': 2}
+        if status_priority.get(risk_level, 0) > status_priority.get(severity_status, 0):
+            return risk_level
+        return severity_status
 
 
 def main():
