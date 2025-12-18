@@ -1,4 +1,4 @@
-# GuardModel v1.0.0 Release Notes
+# GuardModel v1.1.0 Release Notes
 
 **Release Date:** December 2024
 
@@ -10,12 +10,47 @@ GuardModel is a GitHub Action that automatically scans ML model files for malici
 
 ---
 
+## What's New in v1.1.0
+
+### SaferPickle Integration
+
+This release integrates features from [Google's SaferPickle](https://github.com/google/saferpickle) project to enhance pickle scanning capabilities:
+
+- **Safe Pattern Whitelist** - Reduces false positives for common ML libraries (numpy, torch, tensorflow, sklearn, pandas, scipy, transformers, etc.)
+- **Disguised File Detection** - Detects executables and other files masquerading as pickle files (ELF, PE, PNG, JPEG, PDF, ZIP, etc.)
+- **Risk Scoring Algorithm** - Logarithmic scoring that considers the ratio of safe vs unsafe patterns
+- **Unknown Pattern Tracking** - Identifies and reports patterns not in safe/unsafe lists
+- **Suspicious Pattern Detection** - Flags patterns like `__subclasses__`, `__mro__` that may indicate sandbox escape attempts
+
+### New Detection Patterns
+
+Added detection for:
+- `types.CodeType`, `types.FunctionType` - Direct code/function object creation
+- `torch.load`, `pandas.read_pickle` - Unsafe deserialization methods
+- `dill.load`, `cloudpickle.load`, `joblib.load` - Alternative pickle libraries
+- `shelve.open` - Pickle-based database
+- `webbrowser.open` - URL opening capability
+- `sympy.lambdify` - Code generation
+
+### Enhanced Metadata
+
+Scan results now include:
+- `safe_count` - Number of safe patterns detected
+- `unsafe_count` - Number of unsafe patterns detected
+- `suspicious_count` - Number of suspicious patterns detected
+- `unknown_count` - Number of unclassified patterns
+- `risk_score` - Numeric risk score (0-10)
+- `disguised_file_type` - Type of file if disguised as pickle
+
+---
+
 ## Highlights
 
 - **4 Scanner Agents** - Pickle, Keras, ONNX, and SafeTensors
-- **70+ Detection Rules** - Comprehensive threat coverage
+- **85+ Detection Rules** - Comprehensive threat coverage (expanded from 70+)
 - **GitHub Integration** - SARIF output for Security tab, PR comments
 - **Zero Configuration** - Works out of the box with sensible defaults
+- **SaferPickle Integration** - Enhanced pickle analysis with risk scoring
 
 ---
 
@@ -32,11 +67,17 @@ GuardModel is a GitHub Action that automatically scans ML model files for malici
 
 ## Detection Categories
 
+### Disguised Files (Critical)
+- ELF executables masquerading as pickle files
+- Windows PE executables (`.exe`, `.dll`)
+- Files with mismatched magic bytes
+
 ### Code Execution (Critical)
 - `os.system`, `os.popen`, `posix.system`
 - `subprocess.Popen`, `subprocess.call`, `subprocess.run`
 - `builtins.eval`, `builtins.exec`, `builtins.compile`
 - `pty.spawn`, `os.execv`, `os.spawnl`
+- `types.CodeType`, `types.FunctionType` (direct code creation)
 
 ### Reverse Shells (Critical)
 - `socket.socket`, `socket.create_connection`
@@ -57,6 +98,12 @@ GuardModel is a GitHub Action that automatically scans ML model files for malici
 - `importlib.import_module`, `__import__`
 - `ctypes.CDLL`, `ctypes.cdll`
 - `runpy.run_module`, `runpy.run_path`
+- `torch.load`, `pandas.read_pickle`, `joblib.load`
+- `dill.load`, `cloudpickle.load`
+
+### Suspicious Patterns (Medium)
+- `__subclasses__`, `__mro__`, `__bases__` (sandbox escape techniques)
+- `__reduce_ex__`, `__getstate__`, `__setstate__` (custom pickle behavior)
 
 ### Obfuscation (Medium-High)
 - `base64.b64decode`, `marshal.loads`
