@@ -332,7 +332,7 @@ Ensure file extensions are correct (`.pkl`, `.pt`, etc.)
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+Open Database License (ODbL) v1.0 - See [LICENSE](LICENSE) for details.
 
 ---
 
