@@ -1,6 +1,6 @@
 ## ODC Open Database License (ODbL) v1.0
 
-Copyright (c) 2024 GuardModel Contributors
+Copyright (c) 2025 GuardModel Contributors
 
 ### Preamble
 
