@@ -93,5 +93,5 @@ runs:
       if: inputs.output-sarif == 'true' && always()
       uses: github/codeql-action/upload-sarif@v3
       with:
-        sarif_file: modelguard-results.sarif
+        sarif_file: guardmodel-results.sarif
       continue-on-error: true

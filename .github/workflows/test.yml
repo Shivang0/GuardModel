@@ -112,8 +112,8 @@ jobs:
 
       - name: Verify outputs
         run: |
-          test -f modelguard-results.sarif || echo "SARIF output missing"
-          test -f modelguard-results.json || echo "JSON output missing"
+          test -f guardmodel-results.sarif || echo "SARIF output missing"
+          test -f guardmodel-results.json || echo "JSON output missing"
 
   lint:
     name: Lint
