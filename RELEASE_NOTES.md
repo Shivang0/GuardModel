@@ -10,18 +10,6 @@ GuardModel is a GitHub Action that automatically scans ML model files for malici
 
 ---
 
-## What's New in v1.1.0
-
-### SaferPickle Integration
-
-This release integrates features from [Google's SaferPickle](https://github.com/google/saferpickle) project to enhance pickle scanning capabilities:
-
-- **Safe Pattern Whitelist** - Reduces false positives for common ML libraries (numpy, torch, tensorflow, sklearn, pandas, scipy, transformers, etc.)
-- **Disguised File Detection** - Detects executables and other files masquerading as pickle files (ELF, PE, PNG, JPEG, PDF, ZIP, etc.)
-- **Risk Scoring Algorithm** - Logarithmic scoring that considers the ratio of safe vs unsafe patterns
-- **Unknown Pattern Tracking** - Identifies and reports patterns not in safe/unsafe lists
-- **Suspicious Pattern Detection** - Flags patterns like `__subclasses__`, `__mro__` that may indicate sandbox escape attempts
-
 ### New Detection Patterns
 
 Added detection for:
@@ -332,7 +320,7 @@ Ensure file extensions are correct (`.pkl`, `.pt`, etc.)
 
 ## License
 
-Open Database License (ODbL) v1.0 - See [LICENSE](LICENSE) for details.
+MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 

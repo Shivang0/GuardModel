@@ -1,0 +1,6 @@
+# Model files - downloaded on-demand
+models/
+
+# Results files
+*.sarif
+*.json

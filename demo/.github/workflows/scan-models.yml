@@ -1,0 +1,57 @@
+name: Model Security Scan
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'models/**'
+      - '.github/workflows/scan-models.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'models/**'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scan:
+    name: Scan ML Models
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download demo models
+        run: python download_model.py
+
+      - name: Run GuardModel Security Scan
+        uses: Shivang0/GuardModel@main
+        with:
+          path: models/
+          fail-on: high
+          output-sarif: true
+          output-json: true
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: guardmodel-results.sarif
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guardmodel-results
+          path: |
+            guardmodel-results.sarif
+            guardmodel-results.json
