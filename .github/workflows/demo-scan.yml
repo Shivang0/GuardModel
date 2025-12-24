@@ -1,0 +1,47 @@
+name: Demo Model Scan
+
+on:
+  push:
+    paths:
+      - 'demo/**'
+      - '.github/workflows/demo-scan.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scan-demo:
+    name: Scan Demo Models
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download demo models
+        working-directory: demo
+        run: python download_model.py
+
+      - name: Run GuardModel Security Scan
+        uses: ./
+        with:
+          path: demo/models/
+          fail-on: high
+          output-sarif: true
+          output-json: true
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-scan-results
+          path: |
+            guardmodel-results.sarif
+            guardmodel-results.json
