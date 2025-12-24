@@ -23,4 +23,3 @@ export declare function getAgentType(extension: string): string;
  * Format file size for display
  */
 export declare function formatSize(bytes: number): string;
-//# sourceMappingURL=walker.d.ts.map

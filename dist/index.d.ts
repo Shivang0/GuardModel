@@ -4,4 +4,3 @@
  * Scans ML model files for malicious code, vulnerabilities, and security risks.
  */
 export {};
-//# sourceMappingURL=index.d.ts.map

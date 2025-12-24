@@ -54,4 +54,3 @@ export declare function isAllowlisted(config: Config, sha256: string): boolean;
  * Get the reason for an allowlisted hash
  */
 export declare function getAllowlistReason(config: Config, sha256: string): string | undefined;
-//# sourceMappingURL=config.d.ts.map
